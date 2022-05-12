@@ -57,8 +57,10 @@ namespace TheUnitTestProject
             Assert.AreEqual(target.HttpContext.Response.StatusCode, 201);
 
             result = target.Diff(index);
-            Assert.AreEqual((result as JsonResult).Data.ToString(),
-              "{ diffResultType = { \"diffResultType\": \"ContentDoNotMatch\", \"diffs\": [{ \"offset\":1, \"length\":1,{ \"offset\":3, \"length\":1,{ \"offset\":5, \"length\":1]} }");
+            Debug.WriteLine((result as JsonResult).Data.ToString());
+            Assert.AreEqual("{ diffResultType = ContentDoNotMatch, diffs = [{ \"offset\":0, \"length\":1},{ \"offset\":2, \"length\":2}] }",
+                (result as JsonResult).Data.ToString());
+            //"{ diffResultType = { \"diffResultType\": \"ContentDoNotMatch\", \"diffs\": [{ \"offset\":1, \"length\":1,{ \"offset\":3, \"length\":1,{ \"offset\":5, \"length\":1]} }");
         }
     }
 }

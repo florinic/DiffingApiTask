@@ -14,15 +14,11 @@ namespace DiffingApiTask.Controllers
     //[RoutePrefix("v1")]
     public class EndpointController : Controller
     {
-        // quick and dirty solution : should be persisted, locked before reading, unlock after updating and retried when locked
-        // left = Key, right = Value
-        //private static Dictionary<int, KeyValuePair<string, string>> partialInfo = new Dictionary<int, KeyValuePair<string, string>>();
+        // quick and dirty solution for persistence: TempData;
+        // should be persisted, locked before reading, unlock after updating and retried when locked
 
-        [HttpGet]
-        public ActionResult Test()
-        {
-            return this.Json(new { diffResultType = "Test" }, JsonRequestBehavior.AllowGet);
-        }
+        private const string Right = "right";
+        private const string Left = "left";
 
         // v1/diff/{ID}
         //[HttpGet]
@@ -44,18 +40,28 @@ namespace DiffingApiTask.Controllers
             // have equal lengths?
             if (left.Length != right.Length)
             {
-                this.HttpContext.Response.StatusCode = 200;
-                return this.Json(new { diffResultType = "SizeDoNotMatch" }, JsonRequestBehavior.AllowGet);
+                return StatusAndInfo(200, "SizeDoNotMatch");
             }
 
             // diff
             if (left == right)
             {
-                this.HttpContext.Response.StatusCode = 200;
-                return this.Json(new { diffResultType = "Equals" }, JsonRequestBehavior.AllowGet);
+                // if removed, see end of GetDiffInfo()
+                return StatusAndInfo(200, "Equals");
             }
 
-            var diff = new StringBuilder();
+            // convert from base64
+            left = Encoding.UTF8.GetString(Convert.FromBase64String(left));
+            right = Encoding.UTF8.GetString(Convert.FromBase64String(right));
+
+            // actual diff
+            var diffMessage = GetDiffInfo(left, right);
+            return this.Json(new { diffResultType = "ContentDoNotMatch", diffs = diffMessage }, JsonRequestBehavior.AllowGet);
+        }
+
+        private static string GetDiffInfo(string left, string right)
+        {
+            var diff = new StringBuilder();     // offset/length array
             var lastEqual = true;
             var fromIndex = 0;
             for (int i = 0; i < left.Length; i++)
@@ -69,7 +75,7 @@ namespace DiffingApiTask.Controllers
                 if (areEqual)
                 {
                     // stop counting
-                    diff.AppendFormat("{{ \"offset\":{0}, \"length\":{1},", fromIndex, i - fromIndex);
+                    diff.AppendFormat("{{ \"offset\":{0}, \"length\":{1}}},", fromIndex, i - fromIndex);
                 }
                 else
                 {
@@ -80,9 +86,14 @@ namespace DiffingApiTask.Controllers
                 lastEqual = areEqual;
             }
 
-            var diffMessage = @"{ ""diffResultType"": ""ContentDoNotMatch"", ""diffs"": [" +
-                diff.ToString(0, diff.Length - 1) + "]}";
-            return this.Json(new { diffResultType = diffMessage }, JsonRequestBehavior.AllowGet);
+            if (!lastEqual)
+            {
+                // trailing open difference
+                diff.AppendFormat("{{ \"offset\":{0}, \"length\":{1}}},", fromIndex, left.Length - fromIndex);
+            }
+
+            // checking for diff.Length == 0 is superfluous, since it is checked for earlier
+            return "[" + diff.ToString(0, diff.Length - 1) + "]";
         }
 
         //v1/diff/{ID}/side
@@ -108,31 +119,43 @@ namespace DiffingApiTask.Controllers
                 }
             }
 
-            if (string.Compare(side, "left", true) == 0)
+            if (string.Compare(side, Left, true) == 0)
             {
                 SetLeftIndex(index, content);
             }
-            else if (string.Compare(side, "right", true) == 0)
+            else if (string.Compare(side, Right, true) == 0)
             {
                 SetRightIndex(index, content);
             }
             else
             {
-                this.HttpContext.Response.StatusCode = 404;
-                return Json(null, JsonRequestBehavior.AllowGet);
+                return HttpNotFound();
             }
 
-            this.HttpContext.Response.StatusCode = 201;
-            return Json(null, JsonRequestBehavior.AllowGet);
+            return StatusAndInfo(201, string.Empty);
         }
 
-        private string GetRightIndex(int index) => GetIndex(index, "right");
-        private string GetLeftIndex(int index) => GetIndex(index, "left");
+        /// <summary>
+        /// set status and return a JSON object containing the info 
+        /// </summary>
+        /// <param name="StatusCode"></param>
+        /// <param name="info"></param>
+        /// <returns>JSON object</returns>
+        private ActionResult StatusAndInfo(int StatusCode, string info)
+        {
+            this.HttpContext.Response.StatusCode = StatusCode;
+            return this.Json(new { diffResultType = info }, JsonRequestBehavior.AllowGet);
+        }
+
+        #region persistence access 
+        private string GetRightIndex(int index) => GetIndex(index, Right);
+        private string GetLeftIndex(int index) => GetIndex(index, Left);
         private string GetIndex(int index, string suffix) => TempData.ContainsKey(index + suffix) ? TempData[index + suffix] as string : string.Empty;
 
-        private void SetRightIndex(int index, string value) => SetIndex(index, "right", value);
-        private void SetLeftIndex(int index, string value) => SetIndex(index, "left", value);
+        private void SetRightIndex(int index, string value) => SetIndex(index, Right, value);
+        private void SetLeftIndex(int index, string value) => SetIndex(index, Left, value);
         private void SetIndex(int index, string suffix, string value) => TempData[index + suffix] = value;
+        #endregion
 
         public class BodyContent
         {
